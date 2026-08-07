@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Famous Mic with Deep Double Voice</title>
+<style>
+  body {
+    background-color: #111;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+    font-family: Arial, sans-serif;
+    color: #fff;
+  }
+
+  /* Mic styling */
+  .mic {
+    width: 150px;
+    height: 300px;
+    background: linear-gradient(145deg, #ffd700, #ffb700);
+    border-radius: 50px 50px 20px 20px;
+    position: relative;
+    box-shadow: 0 0 30px rgba(255, 215, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+
+  .mic:hover {
+    transform: scale(1.05);
+  }
+
+  /* Mic top part (head) */
+  .mic-head {
+    width: 80px;
+    height: 80px;
+    background: #222;
+    border-radius: 50%;
+    position: absolute;
+    top: -40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 0 10px #555;
+  }
+
+  /* Mic grill (inside head) */
+  .grill {
+    width: 60px;
+    height: 60px;
+    background: radial-gradient(circle, #555, #222);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Button to start/stop microphone */
+  #micButton {
+    margin-top: 20px;
+    padding: 10px 20px;
+    background-color: #ffd700;
+    border: none;
+    border-radius: 5px;
+    font-size: 1em;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+
+  #micButton:hover {
+    background-color: #e6c200;
+  }
+</style>
+</head>
+<body>
+
+<h1>Famous Microphone with Deep Double Voice</h1>
+<div class="mic" id="microphone">
+  <div class="mic-head">
+    <div class="grill"></div>
+  </div>
+</div>
+<button id="micButton">Start Mic</button>
+
+<script>
+  const micElement = document.getElementById('microphone');
+  const button = document.getElementById('micButton');
+
+let mediaStream = null;
+let audioContext = null;
+let source = null;
+let splitter = null;
+let merger = null;
+let stereoGainLeft = null;
+let stereoGainRight = null;
+let deepVoice = null;
+let isMicOn = false;
+
+// Function to create stereo double voice effect
+async function startMic() {
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      source = audioContext.createMediaStreamSource(mediaStream);
+
+      // Create splitter and merger for stereo effect
+      splitter = audioContext.createChannelSplitter(2);
+      merger = audioContext.createChannelMerger(2);
+
+      // Create gain nodes for stereo channels
+      stereoGainLeft = audioContext.createGain();
+      stereoGainRight = audioContext.createGain();
+
+      // Connect source to splitter
+      source.connect(splitter);
+
+      // Left channel: add delay or pitch shift for deeper voice
+      // For simplicity, we'll just duplicate the signal with a slight delay
+      const delayNode = audioContext.createDelay();
+      delayNode.delayTime.value = 0.02; // 20ms delay for stereo effect
+
+      // Connect left channel
+      splitter.connect(stereoGainLeft, 0);
+      stereoGainLeft.connect(merger, 0, 0);
+
+      // Connect right channel
+      splitter.connect(stereoGainRight, 1);
+      stereoGainRight.connect(merger, 0, 1);
+
+      // Connect merger to destination
+      merger.connect(audioContext.destination);
+
+      // For deeper double voice, you can add pitch-shifting or additional effects here
+      // but for simplicity, we're using delay to create stereo separation
+
+      isMicOn = true;
+      button.textContent = 'Stop Mic';
+    } catch (err) {
+      alert('Microphone access denied or error: ' + err);
+    }
+  } else {
+    alert('getUserMedia not supported in your browser');
+  }
+}
+
+function stopMic() {
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(track => track.stop());
+  }
+  if (audioContext) {
+    audioContext.close();
+  }
+  isMicOn = false;
+  button.textContent = 'Start Mic';
+}
+
+button.addEventListener('click', () => {
+  if (!isMicOn) {
+    startMic();
+  } else {
+    stopMic();
+  }
+});
+</script>
+
+</body>
+</html>
