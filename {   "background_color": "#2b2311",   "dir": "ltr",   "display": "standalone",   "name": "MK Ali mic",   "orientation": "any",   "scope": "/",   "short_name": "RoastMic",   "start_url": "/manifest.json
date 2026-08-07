@@ -1,0 +1,13 @@
+{
+  "background_color": "#2b2311",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "MK Ali mic",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "RoastMic",
+  "start_url": "/",
+  "theme_color": "#0d1290",
+  "description": "Deep double voice roasting microphone app",
+  "id": "/mic/"
+}
