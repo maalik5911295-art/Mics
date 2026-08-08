@@ -35,6 +35,8 @@
             margin-top: 20px;
             font-size: 16px;
             color: #8b949e;
+            text-align: center;
+            padding: 0 20px;
         }
     </style>
 </head>
@@ -42,7 +44,7 @@
 
     <h1>MK Blaster Mic (Pro)</h1>
     <button id="startBtn">Start Pro Mic</button>
-    <div id="status">Microphone is offline</div>
+    <div id="status">Tap button to initialize mic</div>
 
     <script>
         const startBtn = document.getElementById('startBtn');
@@ -51,48 +53,51 @@
 
         startBtn.addEventListener('click', async () => {
             try {
-                // Request raw high-gain audio stream
+                statusDiv.innerText = "Initializing audio...";
+                
+                // 1. Create or resume AudioContext immediately on click
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') {
+                    await audioCtx.resume();
+                }
+
+                // 2. Request explicit audio stream constraints
                 micStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         echoCancellation: false,
                         noiseSuppression: false,
-                        autoGainControl: false,
+                        autoGainControl: true,
                         latency: 0.0
                     }
                 });
 
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 const source = audioCtx.createMediaStreamSource(micStream);
 
-                // 1. Create a Stereo Merger to combine dual channels
+                // 3. Create Stereo Merger & Delay for heavy vocal body
                 const merger = audioCtx.createChannelMerger(2);
-
-                // 2. Create Delay Node for the second channel to create the "Double/Stereo" effect
                 const delayNode = audioCtx.createDelay();
-                delayNode.delayTime.value = 0.03; // 30ms delay creates heavy vocal body
+                delayNode.delayTime.value = 0.02; // 20ms doubling effect
 
-                // 3. Create a powerful Gain Booster (4.0 = 400% volume)
+                // 4. Massive Volume Booster (8.0 = 800% loud punch)
                 const gainNode = audioCtx.createGain();
-                gainNode.gain.value = 4.0;
+                gainNode.gain.value = 8.0; 
 
-                // Route audio: Source splits into Left (direct) and Right (delayed doubling)
-                source.connect(merger, 0, 0); // Left channel
-                source.connect(delayNode);     // Delay layer
-                delayNode.connect(merger, 0, 1); // Right channel (creates stereo separation)
+                // Route audio paths
+                source.connect(merger, 0, 0); 
+                source.connect(delayNode);     
+                delayNode.connect(merger, 0, 1); 
 
-                // Pass through volume booster to output speakers/headset
                 merger.connect(gainNode);
                 gainNode.connect(audioCtx.destination);
 
-                statusDiv.innerText = "Status: Pro Stereo Mic Live!";
+                statusDiv.innerText = "Status: PRO MIC LIVE & BOOSTED!";
                 statusDiv.style.color = "#3fb950";
                 startBtn.innerText = "Running Pro...";
                 startBtn.style.backgroundColor = "#238636";
 
             } catch (err) {
                 console.error("Mic error:", err);
-                alert("Microphone permission denied or device error.");
-                statusDiv.innerText = "Status: Error starting mic";
+                statusDiv.innerText = "Error: Check permissions or plug in wired mic.";
                 statusDiv.style.color = "#f85149";
             }
         });
