@@ -1,318 +1,175 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RoastMic - MK Blaster Mic</title>
-    
-    <!-- PWA Manifest Link -->
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#38bdf8">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script>
+    let audioContext = null;
+    let mediaStream = null;
+    let sourceNode = null;
+    let gainNode = null;
+    let delayNode = null;
+    let wakeLock = null;
+    let silentAudioElement = null;
 
-    <style>
-        :root {
-            --bg-color: #0f172a;
-            --card-bg: #1e293b;
-            --accent: #38bdf8;
-            --accent-hover: #0ea5e9;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --danger: #ef4444;
-            --success: #22c55e;
+    const toggleButton = document.getElementById('toggleButton');
+    const statusBadge = document.getElementById('statusBadge');
+    const audioSourceSelect = document.getElementById('audioSource');
+    const volumeSlider = document.getElementById('volumeSlider');
+    const delaySlider = document.getElementById('delaySlider');
+
+    // Force persistent media session state to prevent Android privacy hardware kill
+    function setupMediaSession() {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: 'MK Blaster Live Mic',
+                artist: 'Active Broadcast',
+                album: 'RoastMic Engine'
+            });
+
+            navigator.mediaSession.setActionHandler('play', () => {});
+            navigator.mediaSession.setActionHandler('pause', () => {});
         }
+    }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    function startSilentAudioBuffer() {
+        if (!silentAudioElement) {
+            silentAudioElement = document.createElement('audio');
+            silentAudioElement.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+            silentAudioElement.loop = true;
+            silentAudioElement.volume = 0.01;
         }
+        silentAudioElement.play().catch(e => console.log("Audio play error:", e));
+    }
 
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
+    function stopSilentAudioBuffer() {
+        if (silentAudioElement) {
+            silentAudioElement.pause();
+            silentAudioElement.currentTime = 0;
         }
+    }
 
-        .container {
-            width: 100%;
-            max-width: 400px;
-            background-color: var(--card-bg);
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-            text-align: center;
+    async function requestWakeLock() {
+        if ('wakeLock' in navigator) {
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+            } catch (err) {
+                console.error(`Wake Lock error: ${err.name}`);
+            }
         }
+    }
 
-        h1 {
-            font-size: 1.5rem;
-            margin-bottom: 8px;
-            color: var(--accent);
+    async function releaseWakeLock() {
+        if (wakeLock !== null) {
+            await wakeLock.release();
+            wakeLock = null;
         }
+    }
 
-        p.subtitle {
-            color: var(--text-muted);
-            font-size: 0.9rem;
-            margin-bottom: 24px;
+    document.addEventListener('visibilitychange', async () => {
+        if (wakeLock !== null && document.visibilityState === 'visible') {
+            await requestWakeLock();
         }
+    });
 
-        .status-badge {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            margin-bottom: 20px;
-            background-color: rgba(239, 68, 68, 0.2);
-            color: var(--danger);
-        }
-
-        .status-badge.active {
-            background-color: rgba(34, 197, 94, 0.2);
-            color: var(--success);
-        }
-
-        .btn {
-            width: 100%;
-            padding: 14px;
-            border: none;
-            border-radius: 10px;
-            font-size: 1rem;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-            margin-bottom: 12px;
-        }
-
-        .btn-primary {
-            background-color: var(--accent);
-            color: #0f172a;
-        }
-
-        .controls {
-            margin-top: 16px;
-            text-align: left;
-        }
-
-        label {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            display: block;
-            margin-bottom: 6px;
-        }
-
-        select, input[type="range"] {
-            width: 100%;
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid #334155;
-            background-color: #0f172a;
-            color: var(--text-main);
-            margin-bottom: 16px;
-        }
-    </style>
-</head>
-<body>
-
-    <div class="container">
-        <h1>RoastMic</h1>
-        <p class="subtitle">MK Blaster Stereo Engine</p>
-
-        <div id="statusBadge" class="status-badge">Status: Offline</div>
-
-        <div class="controls">
-            <label for="audioSource">Microphone Source</label>
-            <select id="audioSource">
-                <option value="">Default Microphone</option>
-            </select>
-
-            <label for="volumeSlider">Blaster Gain Volume</label>
-            <input type="range" id="volumeSlider" min="0" max="2" step="0.1" value="1.5">
+    async function getAudioDevices() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter(device => device.kind === 'audioinput');
             
-            <label for="delaySlider">Stereo Voice Doubling / Echo Delay</label>
-            <input type="range" id="delaySlider" min="0" max="0.1" step="0.01" value="0.03">
-        </div>
-
-        <button id="toggleButton" class="btn btn-primary">Start Blaster Mic</button>
-    </div>
-
-    <script>
-        let audioContext = null;
-        let mediaStream = null;
-        let sourceNode = null;
-        let gainNode = null;
-        let delayNode = null;
-        let mergerNode = null;
-        let wakeLock = null;
-        let silentAudioElement = null;
-
-        const toggleButton = document.getElementById('toggleButton');
-        const statusBadge = document.getElementById('statusBadge');
-        const audioSourceSelect = document.getElementById('audioSource');
-        const volumeSlider = document.getElementById('volumeSlider');
-        const delaySlider = document.getElementById('delaySlider');
-
-        // Silent audio trick to prevent Oppo/ColorOS from killing the web process in background
-        function startSilentAudioBuffer() {
-            if (!silentAudioElement) {
-                silentAudioElement = document.createElement('audio');
-                silentAudioElement.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-                silentAudioElement.loop = true;
-                silentAudioElement.volume = 0.01;
-            }
-            silentAudioElement.play().catch(e => console.log("Silent audio blocked:", e));
+            audioSourceSelect.innerHTML = '<option value="">Default Microphone</option>';
+            audioInputs.forEach((device, index) => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Microphone ${index + 1}`;
+                audioSourceSelect.appendChild(option);
+            });
+        } catch (err) {
+            console.error('Error enumerating devices:', err);
         }
+    }
 
-        function stopSilentAudioBuffer() {
-            if (silentAudioElement) {
-                silentAudioElement.pause();
-                silentAudioElement.currentTime = 0;
+    async function startMic() {
+        try {
+            await requestWakeLock();
+            startSilentAudioBuffer();
+            setupMediaSession();
+
+            const selectedDeviceId = audioSourceSelect.value;
+            const constraints = {
+                audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true,
+                video: false
+            };
+
+            mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+            
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
             }
-        }
 
-        async function requestWakeLock() {
-            if ('wakeLock' in navigator) {
-                try {
-                    wakeLock = await navigator.wakeLock.request('screen');
-                } catch (err) {
-                    console.error(`Wake Lock error: ${err.name}`);
-                }
-            }
-        }
+            sourceNode = audioContext.createMediaStreamSource(mediaStream);
+            
+            // Blaster Stereo Voice Doubling Nodes
+            gainNode = audioContext.createGain();
+            gainNode.gain.value = parseFloat(volumeSlider.value);
 
-        async function releaseWakeLock() {
-            if (wakeLock !== null) {
-                await wakeLock.release();
-                wakeLock = null;
-            }
-        }
+            delayNode = audioContext.createDelay();
+            delayNode.delayTime.value = parseFloat(delaySlider.value);
 
-        document.addEventListener('visibilitychange', async () => {
-            if (wakeLock !== null && document.visibilityState === 'visible') {
-                await requestWakeLock();
-            }
-        });
+            // Routing audio paths
+            sourceNode.connect(gainNode);
+            gainNode.connect(audioContext.destination);
 
-        async function getAudioDevices() {
-            try {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const audioInputs = devices.filter(device => device.kind === 'audioinput');
-                
-                audioSourceSelect.innerHTML = '<option value="">Default Microphone</option>';
-                audioInputs.forEach((device, index) => {
-                    const option = document.createElement('option');
-                    option.value = device.deviceId;
-                    option.text = device.label || `Microphone ${index + 1}`;
-                    audioSourceSelect.appendChild(option);
-                });
-            } catch (err) {
-                console.error('Error enumerating devices:', err);
-            }
-        }
+            sourceNode.connect(delayNode);
+            delayNode.connect(audioContext.destination);
 
-        async function startMic() {
-            try {
-                await requestWakeLock();
-                startSilentAudioBuffer();
+            statusBadge.textContent = 'Status: Blaster Live';
+            statusBadge.classList.add('active');
+            toggleButton.textContent = 'Stop Blaster Mic';
+            toggleButton.style.backgroundColor = 'var(--danger)';
+            toggleButton.style.color = '#fff';
 
-                const selectedDeviceId = audioSourceSelect.value;
-                const constraints = {
-                    audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true,
-                    video: false
-                };
-
-                mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-                
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioContext.state === 'suspended') {
-                    await audioContext.resume();
-                }
-
-                sourceNode = audioContext.createMediaStreamSource(mediaStream);
-                
-                // --- Blaster Voice Stereo Doubling Effects Chain ---
-                gainNode = audioContext.createGain();
-                gainNode.gain.value = parseFloat(volumeSlider.value);
-
-                // Delay node creates the stereo voice doubling / multi-tracking effect
-                delayNode = audioContext.createDelay();
-                delayNode.delayTime.value = parseFloat(delaySlider.value);
-
-                // Connect nodes: Split audio into raw path and delayed stereo path for thickness
-                sourceNode.connect(gainNode);
-                gainNode.connect(audioContext.destination);
-
-                sourceNode.connect(delayNode);
-                delayNode.connect(audioContext.destination);
-
-                if ('mediaSession' in navigator) {
-                    navigator.mediaSession.metadata = new MediaMetadata({
-                        title: 'RoastMic Blaster Active',
-                        artist: 'MK Blaster Engine',
-                        album: 'Live Stereo Stream'
-                    });
-                }
-
-                statusBadge.textContent = 'Status: Blaster Live';
-                statusBadge.classList.add('active');
-                toggleButton.textContent = 'Stop Blaster Mic';
-                toggleButton.style.backgroundColor = 'var(--danger)';
-                toggleButton.style.color = '#fff';
-
-            } catch (err) {
-                console.error('Error starting microphone:', err);
-                alert('Could not access microphone permissions.');
-                await releaseWakeLock();
-                stopSilentAudioBuffer();
-            }
-        }
-
-        async function stopMic() {
-            if (mediaStream) {
-                mediaStream.getTracks().forEach(track => track.stop());
-            }
-            if (audioContext) {
-                await audioContext.close();
-            }
+        } catch (err) {
+            console.error('Error starting microphone:', err);
+            alert('Microphone hardware access blocked by system in background.');
             await releaseWakeLock();
             stopSilentAudioBuffer();
-
-            statusBadge.textContent = 'Status: Offline';
-            statusBadge.classList.remove('active');
-            toggleButton.textContent = 'Start Blaster Mic';
-            toggleButton.style.backgroundColor = 'var(--accent)';
-            toggleButton.style.color = '#0f172a';
         }
+    }
 
-        toggleButton.addEventListener('click', async () => {
-            if (toggleButton.textContent.includes('Start')) {
-                await startMic();
-            } else {
-                await stopMic();
-            }
-        });
+    async function stopMic() {
+        if (mediaStream) {
+            mediaStream.getTracks().forEach(track => track.stop());
+        }
+        if (audioContext) {
+            await audioContext.close();
+        }
+        await releaseWakeLock();
+        stopSilentAudioBuffer();
 
-        volumeSlider.addEventListener('input', (e) => {
-            if (gainNode && audioContext) {
-                gainNode.gain.setValueAtTime(parseFloat(e.target.value), audioContext.currentTime);
-            }
-        });
+        statusBadge.textContent = 'Status: Offline';
+        statusBadge.classList.remove('active');
+        toggleButton.textContent = 'Start Blaster Mic';
+        toggleButton.style.backgroundColor = 'var(--accent)';
+        toggleButton.style.color = '#0f172a';
+    }
 
-        delaySlider.addEventListener('input', (e) => {
-            if (delayNode && audioContext) {
-                delayNode.delayTime.setValueAtTime(parseFloat(e.target.value), audioContext.currentTime);
-            }
-        });
+    toggleButton.addEventListener('click', async () => {
+        if (toggleButton.textContent.includes('Start')) {
+            await startMic();
+        } else {
+            await stopMic();
+        }
+    });
 
-        getAudioDevices();
+    volumeSlider.addEventListener('input', (e) => {
+        if (gainNode && audioContext) {
+            gainNode.gain.setValueAtTime(parseFloat(e.target.value), audioContext.currentTime);
+        }
+    });
+
+    delaySlider.addEventListener('input', (e) => {
+        if (delayNode && audioContext) {
+            delayNode.delayTime.setValueAtTime(parseFloat(e.target.value), audioContext.currentTime);
+        }
+    });
+
+    getAudioDevices();
     </script>
-</body>
-    </html>
-            
+    
