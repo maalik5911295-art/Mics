@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RoastMic - MK Blaster Mic</title>
+    
+    <!-- PWA Manifest Link -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#38bdf8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
     <style>
         :root {
             --bg-color: #0f172a;
@@ -89,10 +96,6 @@
             color: #0f172a;
         }
 
-        .btn-primary:active {
-            background-color: var(--accent-hover);
-        }
-
         .controls {
             margin-top: 16px;
             text-align: left;
@@ -120,7 +123,7 @@
 
     <div class="container">
         <h1>RoastMic</h1>
-        <p class="subtitle">MK Blaster Live Audio Engine</p>
+        <p class="subtitle">MK Blaster Stereo Engine</p>
 
         <div id="statusBadge" class="status-badge">Status: Offline</div>
 
@@ -130,11 +133,14 @@
                 <option value="">Default Microphone</option>
             </select>
 
-            <label for="volumeSlider">Output Volume</label>
-            <input type="range" id="volumeSlider" min="0" max="2" step="0.1" value="1">
+            <label for="volumeSlider">Blaster Gain Volume</label>
+            <input type="range" id="volumeSlider" min="0" max="2" step="0.1" value="1.5">
+            
+            <label for="delaySlider">Stereo Voice Doubling / Echo Delay</label>
+            <input type="range" id="delaySlider" min="0" max="0.1" step="0.01" value="0.03">
         </div>
 
-        <button id="toggleButton" class="btn btn-primary">Start Mic</button>
+        <button id="toggleButton" class="btn btn-primary">Start Blaster Mic</button>
     </div>
 
     <script>
@@ -142,46 +148,58 @@
         let mediaStream = null;
         let sourceNode = null;
         let gainNode = null;
+        let delayNode = null;
+        let mergerNode = null;
         let wakeLock = null;
+        let silentAudioElement = null;
 
         const toggleButton = document.getElementById('toggleButton');
         const statusBadge = document.getElementById('statusBadge');
         const audioSourceSelect = document.getElementById('audioSource');
         const volumeSlider = document.getElementById('volumeSlider');
+        const delaySlider = document.getElementById('delaySlider');
 
-        // Request Screen Wake Lock to prevent the phone browser from putting the script to sleep
+        // Silent audio trick to prevent Oppo/ColorOS from killing the web process in background
+        function startSilentAudioBuffer() {
+            if (!silentAudioElement) {
+                silentAudioElement = document.createElement('audio');
+                silentAudioElement.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+                silentAudioElement.loop = true;
+                silentAudioElement.volume = 0.01;
+            }
+            silentAudioElement.play().catch(e => console.log("Silent audio blocked:", e));
+        }
+
+        function stopSilentAudioBuffer() {
+            if (silentAudioElement) {
+                silentAudioElement.pause();
+                silentAudioElement.currentTime = 0;
+            }
+        }
+
         async function requestWakeLock() {
             if ('wakeLock' in navigator) {
                 try {
                     wakeLock = await navigator.wakeLock.request('screen');
-                    console.log('Wake Lock acquired successfully.');
                 } catch (err) {
-                    console.error(`Wake Lock error: ${err.name}, ${err.message}`);
+                    console.error(`Wake Lock error: ${err.name}`);
                 }
             }
         }
 
-        // Release Wake Lock when stopping the app
         async function releaseWakeLock() {
             if (wakeLock !== null) {
-                try {
-                    await wakeLock.release();
-                    wakeLock = null;
-                    console.log('Wake Lock released.');
-                } catch (err) {
-                    console.error(`Wake Lock release error: ${err.name}, ${err.message}`);
-                }
+                await wakeLock.release();
+                wakeLock = null;
             }
         }
 
-        // Re-acquire Wake Lock if page visibility changes back to visible
         document.addEventListener('visibilitychange', async () => {
             if (wakeLock !== null && document.visibilityState === 'visible') {
                 await requestWakeLock();
             }
         });
 
-        // Populate available audio input devices (microphones)
         async function getAudioDevices() {
             try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
@@ -199,10 +217,10 @@
             }
         }
 
-        // Start Microphone & Audio Processing
         async function startMic() {
             try {
                 await requestWakeLock();
+                startSilentAudioBuffer();
 
                 const selectedDeviceId = audioSourceSelect.value;
                 const constraints = {
@@ -212,43 +230,50 @@
 
                 mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
                 
-                // Initialize Web Audio API
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 if (audioContext.state === 'suspended') {
                     await audioContext.resume();
                 }
 
                 sourceNode = audioContext.createMediaStreamSource(mediaStream);
+                
+                // --- Blaster Voice Stereo Doubling Effects Chain ---
                 gainNode = audioContext.createGain();
                 gainNode.gain.value = parseFloat(volumeSlider.value);
 
-                // Connect routing: Mic -> Gain -> Destination (or speakers/processing output)
+                // Delay node creates the stereo voice doubling / multi-tracking effect
+                delayNode = audioContext.createDelay();
+                delayNode.delayTime.value = parseFloat(delaySlider.value);
+
+                // Connect nodes: Split audio into raw path and delayed stereo path for thickness
                 sourceNode.connect(gainNode);
                 gainNode.connect(audioContext.destination);
 
-                // Setup Media Session API to register active audio playback with the OS
+                sourceNode.connect(delayNode);
+                delayNode.connect(audioContext.destination);
+
                 if ('mediaSession' in navigator) {
                     navigator.mediaSession.metadata = new MediaMetadata({
-                        title: 'RoastMic Active',
+                        title: 'RoastMic Blaster Active',
                         artist: 'MK Blaster Engine',
-                        album: 'Live Audio Stream'
+                        album: 'Live Stereo Stream'
                     });
                 }
 
-                statusBadge.textContent = 'Status: Live & Active';
+                statusBadge.textContent = 'Status: Blaster Live';
                 statusBadge.classList.add('active');
-                toggleButton.textContent = 'Stop Mic';
+                toggleButton.textContent = 'Stop Blaster Mic';
                 toggleButton.style.backgroundColor = 'var(--danger)';
                 toggleButton.style.color = '#fff';
 
             } catch (err) {
                 console.error('Error starting microphone:', err);
-                alert('Could not access the microphone. Check permissions.');
+                alert('Could not access microphone permissions.');
                 await releaseWakeLock();
+                stopSilentAudioBuffer();
             }
         }
 
-        // Stop Microphone & Clean Up Resources
         async function stopMic() {
             if (mediaStream) {
                 mediaStream.getTracks().forEach(track => track.stop());
@@ -257,33 +282,37 @@
                 await audioContext.close();
             }
             await releaseWakeLock();
+            stopSilentAudioBuffer();
 
             statusBadge.textContent = 'Status: Offline';
             statusBadge.classList.remove('active');
-            toggleButton.textContent = 'Start Mic';
+            toggleButton.textContent = 'Start Blaster Mic';
             toggleButton.style.backgroundColor = 'var(--accent)';
             toggleButton.style.color = '#0f172a';
         }
 
-        // Toggle Button Event Listener
         toggleButton.addEventListener('click', async () => {
-            if (toggleButton.textContent === 'Start Mic') {
+            if (toggleButton.textContent.includes('Start')) {
                 await startMic();
             } else {
                 await stopMic();
             }
         });
 
-        // Handle volume change live
         volumeSlider.addEventListener('input', (e) => {
             if (gainNode && audioContext) {
                 gainNode.gain.setValueAtTime(parseFloat(e.target.value), audioContext.currentTime);
             }
         });
 
-        // Initialize device list on load
+        delaySlider.addEventListener('input', (e) => {
+            if (delayNode && audioContext) {
+                delayNode.delayTime.setValueAtTime(parseFloat(e.target.value), audioContext.currentTime);
+            }
+        });
+
         getAudioDevices();
     </script>
 </body>
     </html>
-    
+            
